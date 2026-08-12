@@ -1,0 +1,52 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_container-sistema-OS
+    restart: always  
+    ports:
+      - "5431:5431"
+    environment:
+      - TZ=America/Sao_Paulo
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=sistema-OS
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sistema-OS"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin_container-sistema-OS
+    restart: always
+    ports:
+      - "5051:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "admin@admin.com"
+      PGADMIN_DEFAULT_PASSWORD: "admin"
+    depends_on:
+      - postgres
+
+
+  api:
+    container_name: api_sistema-OS
+    restart: on-failure:5
+    build:
+      context: ./back-end
+      dockerfile: dockerfile
+    # Propriedades movidas para o nível correto do serviço:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./back-end/.env
+    volumes:
+      - ./back-end:/app
+
+volumes:
+  postgres_data:
