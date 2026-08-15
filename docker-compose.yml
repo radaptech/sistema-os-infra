@@ -1,5 +1,39 @@
 services:
 
+  # Proxy reverso. Serve front e API na MESMA origem (http://<tenant>.localhost:8090):
+  # /api vai pro back-end, todo o resto pro Vite. Mesma origem é requisito, não estética
+  # -- o cookie de sessão é SameSite=Lax e "a.localhost" e "b.localhost" são sites
+  # diferentes pro browser, então front e API em subdomínios distintos não trocariam
+  # cookie em dev.
+  #
+  # Portas 8090/8091 porque 80 e 8080 são do traefik do projeto sgeepi-infra.
+  # Os dois traefik enxergam o mesmo socket do Docker, então este aqui:
+  #   - só aceita containers deste compose (constraint no label de projeto);
+  #   - usa um entrypoint de nome próprio ("websos"), que não existe no outro traefik --
+  #     routers apontando pra entrypoint inexistente são descartados lá, então os labels
+  #     abaixo não vazam pro projeto vizinho.
+  traefik:
+    image: traefik:v3
+    container_name: traefik_sistema-OS
+    restart: always
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=sistema-os_default"
+      - "--providers.docker.constraints=Label(`com.docker.compose.project`,`sistema-os`)"
+      - "--entrypoints.websos.address=:80"
+    ports:
+      - "8090:80"    # entrada da aplicação
+      - "8091:8080"  # dashboard do traefik (dev; --api.insecure não vai pra produção)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      default:
+        # IP fixo só pra existir o que declarar em TRUSTED_PROXIES da api.
+        ipv4_address: 172.29.0.2
+
   postgres:
     image: postgres:16-alpine
     container_name: postgres_container-sistema-OS
@@ -45,8 +79,53 @@ services:
         condition: service_healthy
     env_file:
       - ./back-end/.env
+    environment:
+      # Só o traefik pode ditar o X-Forwarded-For; de resto o ClientIP é o IP da
+      # conexão. Sem isto o rate limit do login cai com um header forjado.
+      # Em produção: o endereço do proxy do Railway, não este.
+      - TRUSTED_PROXIES=172.29.0.2/32
     volumes:
       - ./back-end:/app
+    # Sem "ports": quem publica é o traefik. Prioridade alta pra /api ganhar do
+    # catch-all do front.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.os-api.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.os-api.entrypoints=websos"
+      - "traefik.http.routers.os-api.priority=100"
+      - "traefik.http.services.os-api.loadbalancer.server.port=8081"
+
+
+  front:
+    image: node:22-alpine
+    container_name: front_sistema-OS
+    restart: on-failure:5
+    working_dir: /app
+    # --host 0.0.0.0 pro Vite aceitar conexão de fora do container. O Vite já libera
+    # *.localhost por padrão, então o subdomínio do tenant passa sem allowedHosts.
+    command: sh -c "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0 --port 3000"
+    environment:
+      # Mesma origem: api.ts monta /api/... em cima do host que serviu a página, e é
+      # window.location.hostname que vira o X-tenant-ID. Um valor absoluto aqui fixaria
+      # um tenant só.
+      - REACT_APP_URL_API=/api
+      - VITE_USE_MOCKS=false
+    volumes:
+      - ./front-end:/app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.os-front.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.os-front.entrypoints=websos"
+      - "traefik.http.routers.os-front.priority=1"
+      - "traefik.http.services.os-front.loadbalancer.server.port=3000"
 
 volumes:
   postgres_data:
+
+# Sub-rede declarada (172.29 estava livre) só pra o traefik poder ter IP fixo --
+# ver TRUSTED_PROXIES na api.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
