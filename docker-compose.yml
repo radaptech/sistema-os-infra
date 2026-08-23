@@ -71,21 +71,21 @@ services:
     container_name: api_sistema-OS
     restart: on-failure:5
     build:
-      context: ./back-end
+      context: ./sistema-OSm--Back-end
       dockerfile: dockerfile.dev
     # Propriedades movidas para o nível correto do serviço:
     depends_on:
       postgres:
         condition: service_healthy
     env_file:
-      - ./back-end/.env
+      - ./sistema-OSm--Back-end/.env
     environment:
       # Só o traefik pode ditar o X-Forwarded-For; de resto o ClientIP é o IP da
       # conexão. Sem isto o rate limit do login cai com um header forjado.
       # Em produção: o endereço do proxy do Railway, não este.
       - TRUSTED_PROXIES=172.29.0.2/32
     volumes:
-      - ./back-end:/app
+      - ./sistema-OSm--Back-end:/app
     # Sem "ports": quem publica é o traefik. Prioridade alta pra /api ganhar do
     # catch-all do front.
     labels:
@@ -111,7 +111,7 @@ services:
       - REACT_APP_URL_API=/api
       - VITE_USE_MOCKS=false
     volumes:
-      - ./front-end:/app
+      - ./sistema-OSm--Front-end:/app
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.os-front.rule=PathPrefix(`/`)"
