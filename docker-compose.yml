@@ -72,7 +72,7 @@ services:
     restart: on-failure:5
     build:
       context: ./back-end
-      dockerfile: dockerfile
+      dockerfile: dockerfile.dev
     # Propriedades movidas para o nível correto do serviço:
     depends_on:
       postgres:
